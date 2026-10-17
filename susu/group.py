@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from susu.errors import (
     DuplicateMember,
+    EmptyGroup,
     GroupComplete,
     MembershipLocked,
     Overpayment,
@@ -9,7 +10,7 @@ from susu.errors import (
     UnknownMember,
     WeekNotOpen,
 )
-from susu.models import Contribution, Member, Payout
+from susu.models import CloseResult, Contribution, Member, Payout
 from susu.money import format_ghs, parse_amount
 
 
@@ -76,6 +77,30 @@ class SavingsGroup:
     def owed(self, member_id: str, week: int | None = None) -> Decimal:
         """weekly_amount minus paid for that member and week."""
         return self._weekly_amount - self.paid(member_id, week)
+
+    def close_week(self) -> CloseResult:
+        """Pay the pot to the current beneficiary, or return outstanding balances."""
+        if self.is_complete:
+            raise GroupComplete("The savings group cycle is complete")
+        if not self._members:
+            raise EmptyGroup("Cannot close a group with no members")
+        outstanding = tuple(
+            (m.member_id, self.owed(m.member_id))
+            for m in self._members
+            if self.owed(m.member_id) > 0
+        )
+        if outstanding:
+            return CloseResult(False, None, outstanding)
+        week = self.current_week
+        pot = sum(
+            (c.amount for c in self._contributions if c.week == week),
+            Decimal("0"),
+        )
+        beneficiary = self.current_beneficiary
+        assert beneficiary is not None
+        payout = Payout(week, beneficiary.member_id, pot)
+        self._payouts.append(payout)
+        return CloseResult(True, payout, ())
 
     def _require_member(self, member_id: str) -> Member:
         member = self._find_member(member_id)

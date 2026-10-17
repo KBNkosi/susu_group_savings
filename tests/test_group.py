@@ -1,9 +1,17 @@
 import unittest
 from decimal import Decimal
 
-from susu.errors import DuplicateMember, InvalidAmount, Overpayment, SusuError, UnknownMember
+from susu.errors import (
+    DuplicateMember,
+    InvalidAmount,
+    Overpayment,
+    SusuError,
+    UnknownMember,
+    WeekNotOpen,
+)
 from susu.group import SavingsGroup
-from susu.models import Member
+from susu.models import Member, Payout
+from susu.money import parse_amount
 
 
 class TestSavingsGroup(unittest.TestCase):
@@ -56,6 +64,66 @@ class TestSavingsGroup(unittest.TestCase):
         with self.assertRaises(Overpayment):
             group2.record_contribution("ama", "20.01")
         self.assertEqual(group2.paid("ama"), Decimal("30.00"))
+
+    def test_05_exact_money_and_rejected_precision(self):
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        group.record_contribution("ama", "33.33")
+        group.record_contribution("ama", "16.67")
+        result = group.close_week()
+        self.assertTrue(result.closed)
+        self.assertEqual(result.payout.amount, Decimal("50.00"))
+        with self.assertRaises(InvalidAmount):
+            parse_amount("10.005")
+        with self.assertRaises(InvalidAmount):
+            parse_amount("NaN")
+
+    def test_06_week_cannot_close_lists_outstanding(self):
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        group.add_member("kofi")
+        group.record_contribution("ama", "50.00")
+        result = group.close_week()
+        self.assertFalse(result.closed)
+        self.assertIsNone(result.payout)
+        self.assertEqual(result.outstanding, (("kofi", Decimal("50.00")),))
+        self.assertEqual(group.current_week, 1)
+        self.assertEqual(group.current_beneficiary.member_id, "ama")
+        self.assertEqual(group.payouts, ())
+
+    def test_07_successful_close_pays_pot_to_first_member(self):
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        group.add_member("kofi")
+        group.record_contribution("ama", "50.00")
+        group.record_contribution("kofi", "50.00")
+        result = group.close_week()
+        self.assertEqual(result.payout, Payout(1, "ama", Decimal("100.00")))
+        self.assertEqual(group.payouts, (result.payout,))
+        self.assertEqual(group.current_week, 2)
+        self.assertEqual(group.current_beneficiary.member_id, "kofi")
+
+    def test_08_rotation_and_second_close_does_not_double_pay(self):
+        group = SavingsGroup("50.00")
+        for ident in ("ama", "kofi"):
+            group.add_member(ident)
+        for ident in ("ama", "kofi"):
+            group.record_contribution(ident, "50.00")
+        group.close_week()
+        failed = group.close_week()
+        self.assertFalse(failed.closed)
+        self.assertEqual(len(group.payouts), 1)
+        self.assertEqual(failed.outstanding, (
+            ("ama", Decimal("50.00")),
+            ("kofi", Decimal("50.00")),
+        ))
+        group.record_contribution("ama", "50.00")
+        with self.assertRaises(WeekNotOpen):
+            group.record_contribution("kofi", "50.00", week=1)
+        group.record_contribution("kofi", "50.00", week=2)
+        result = group.close_week()
+        self.assertEqual(result.payout, Payout(2, "kofi", Decimal("100.00")))
+        self.assertEqual(len(group.payouts), 2)
 
 
 if __name__ == "__main__":

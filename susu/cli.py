@@ -101,11 +101,14 @@ def main(argv: list[str] | None = None) -> int:
     if "--demo" in args:
         run_demo()
         return 0
-    while True:
-        try:
-            group = SavingsGroup(input("Weekly amount (GHS): "))
-            break
-        except SusuError as exc:
-            print(exc)
-    run_menu(group)
+    try:
+        while True:
+            try:
+                group = SavingsGroup(input("Weekly amount (GHS): "))
+                break
+            except SusuError as exc:
+                print(exc)
+        run_menu(group)
+    except (EOFError, KeyboardInterrupt):
+        print()
     return 0

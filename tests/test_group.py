@@ -3,7 +3,10 @@ from decimal import Decimal
 
 from susu.errors import (
     DuplicateMember,
+    EmptyGroup,
+    GroupComplete,
     InvalidAmount,
+    MembershipLocked,
     Overpayment,
     SusuError,
     UnknownMember,
@@ -124,6 +127,39 @@ class TestSavingsGroup(unittest.TestCase):
         result = group.close_week()
         self.assertEqual(result.payout, Payout(2, "kofi", Decimal("100.00")))
         self.assertEqual(len(group.payouts), 2)
+
+    def test_09_membership_locked_and_empty_close_rejected(self):
+        empty = SavingsGroup("50.00")
+        with self.assertRaises(EmptyGroup):
+            empty.close_week()
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        group.record_contribution("ama", "10.00")
+        with self.assertRaises(MembershipLocked):
+            group.add_member("kofi")
+        self.assertEqual(len(group.members), 1)
+
+    def test_10_cycle_completion_and_brief_example(self):
+        group = SavingsGroup("50.00")
+        for ident in ("Ama", "Kofi", "Esi"):
+            group.add_member(ident)
+        expected = ("Ama", "Kofi", "Esi")
+        for week, beneficiary in enumerate(expected, start=1):
+            for ident in expected:
+                group.record_contribution(ident, "50.00")
+            result = group.close_week()
+            self.assertTrue(result.closed)
+            self.assertEqual(result.payout.beneficiary_id, beneficiary)
+            self.assertEqual(result.payout.amount, Decimal("150.00"))
+            self.assertEqual(result.payout.week, week)
+        self.assertTrue(group.is_complete)
+        self.assertIsNone(group.current_beneficiary)
+        with self.assertRaises(GroupComplete):
+            group.add_member("Yaw")
+        with self.assertRaises(GroupComplete):
+            group.record_contribution("Ama", "50.00")
+        with self.assertRaises(GroupComplete):
+            group.close_week()
 
 
 if __name__ == "__main__":

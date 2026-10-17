@@ -75,6 +75,7 @@ class TestSavingsGroup(unittest.TestCase):
         group.record_contribution("ama", "16.67")
         result = group.close_week()
         self.assertTrue(result.closed)
+        assert result.payout is not None
         self.assertEqual(result.payout.amount, Decimal("50.00"))
         with self.assertRaises(InvalidAmount):
             parse_amount("10.005")
@@ -91,7 +92,9 @@ class TestSavingsGroup(unittest.TestCase):
         self.assertIsNone(result.payout)
         self.assertEqual(result.outstanding, (("kofi", Decimal("50.00")),))
         self.assertEqual(group.current_week, 1)
-        self.assertEqual(group.current_beneficiary.member_id, "ama")
+        beneficiary = group.current_beneficiary
+        assert beneficiary is not None
+        self.assertEqual(beneficiary.member_id, "ama")
         self.assertEqual(group.payouts, ())
 
     def test_07_successful_close_pays_pot_to_first_member(self):
@@ -104,7 +107,9 @@ class TestSavingsGroup(unittest.TestCase):
         self.assertEqual(result.payout, Payout(1, "ama", Decimal("100.00")))
         self.assertEqual(group.payouts, (result.payout,))
         self.assertEqual(group.current_week, 2)
-        self.assertEqual(group.current_beneficiary.member_id, "kofi")
+        beneficiary = group.current_beneficiary
+        assert beneficiary is not None
+        self.assertEqual(beneficiary.member_id, "kofi")
 
     def test_08_rotation_and_second_close_does_not_double_pay(self):
         group = SavingsGroup("50.00")
@@ -149,6 +154,7 @@ class TestSavingsGroup(unittest.TestCase):
                 group.record_contribution(ident, "50.00")
             result = group.close_week()
             self.assertTrue(result.closed)
+            assert result.payout is not None
             self.assertEqual(result.payout.beneficiary_id, beneficiary)
             self.assertEqual(result.payout.amount, Decimal("150.00"))
             self.assertEqual(result.payout.week, week)
@@ -160,6 +166,39 @@ class TestSavingsGroup(unittest.TestCase):
             group.record_contribution("Ama", "50.00")
         with self.assertRaises(GroupComplete):
             group.close_week()
+
+    def test_11_brief_example(self):
+        group = SavingsGroup("50.00")
+        for ident in ("Ama", "Kofi", "Esi"):
+            group.add_member(ident)
+        group.record_contribution("Ama", "50.00")
+        group.record_contribution("Kofi", "50.00")
+        group.record_contribution("Esi", "30.00")
+        failed = group.close_week()
+        self.assertFalse(failed.closed)
+        self.assertEqual(failed.outstanding, (("Esi", Decimal("20.00")),))
+        group.record_contribution("Esi", "20.00")
+        result = group.close_week()
+        self.assertEqual(result.payout, Payout(1, "Ama", Decimal("150.00")))
+        self.assertEqual(group.current_week, 2)
+        self.assertEqual(group.current_beneficiary, Member("Kofi", "Kofi"))
+
+    def test_12_report_snapshot(self):
+        group = SavingsGroup("50.00")
+        for ident in ("Ama", "Kofi", "Esi"):
+            group.add_member(ident)
+        group.record_contribution("Ama", "50.00")
+        group.record_contribution("Kofi", "20.00")
+        report = group.report()
+        self.assertFalse(report.is_complete)
+        self.assertEqual(report.current_week, 1)
+        self.assertEqual(report.beneficiary_id, "Ama")
+        self.assertEqual(report.pot, Decimal("70.00"))
+        self.assertEqual(report.paid_in_full, ("Ama",))
+        self.assertEqual(
+            report.owing, (("Kofi", Decimal("30.00")), ("Esi", Decimal("50.00")))
+        )
+        self.assertEqual(report.payouts, ())
 
 
 if __name__ == "__main__":

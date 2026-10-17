@@ -1,2 +1,3 @@
-print("not implemented")
-raise SystemExit(1)
+from susu.cli import main
+
+raise SystemExit(main())

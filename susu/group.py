@@ -10,12 +10,12 @@ from susu.errors import (
     UnknownMember,
     WeekNotOpen,
 )
-from susu.models import CloseResult, Contribution, Member, Payout
+from susu.models import CloseResult, Contribution, GroupReport, Member, Payout
 from susu.money import format_ghs, parse_amount
 
 
 class SavingsGroup:
-    def __init__(self, weekly_amount: str) -> None:
+    def __init__(self, weekly_amount: str):
         """Create a group; weekly_amount is parsed with parse_amount."""
         self._weekly_amount: Decimal = parse_amount(weekly_amount)
         self._members: list[Member] = []
@@ -101,6 +101,28 @@ class SavingsGroup:
         payout = Payout(week, beneficiary.member_id, pot)
         self._payouts.append(payout)
         return CloseResult(True, payout, ())
+
+    def report(self) -> GroupReport:
+        """Derived snapshot for the CLI; never mutates state."""
+        if self.is_complete:
+            return GroupReport(True, None, None, Decimal("0"), (), (), self.payouts)
+        week = self.current_week
+        beneficiary = self.current_beneficiary
+        assert beneficiary is not None
+        owing = tuple(
+            (m.member_id, self.owed(m.member_id)) for m in self._members
+            if self.owed(m.member_id) > 0
+        )
+        paid_in_full = tuple(
+            m.member_id for m in self._members if self.owed(m.member_id) == 0
+        )
+        pot = sum(
+            (c.amount for c in self._contributions if c.week == week),
+            Decimal("0"),
+        )
+        return GroupReport(
+            False, week, beneficiary.member_id, pot, paid_in_full, owing, self.payouts
+        )
 
     def _require_member(self, member_id: str) -> Member:
         member = self._find_member(member_id)

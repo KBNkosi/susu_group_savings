@@ -1,4 +1,4 @@
-# Susu Group Tracker — Notes
+# Susu Group Tracker - Notes
 
 ## Overview
 A command-line program managing one rotating savings group (susu). Members pay

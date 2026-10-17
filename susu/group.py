@@ -4,10 +4,13 @@ from susu.errors import (
     DuplicateMember,
     GroupComplete,
     MembershipLocked,
+    Overpayment,
     SusuError,
+    UnknownMember,
+    WeekNotOpen,
 )
 from susu.models import Contribution, Member, Payout
-from susu.money import parse_amount
+from susu.money import format_ghs, parse_amount
 
 
 class SavingsGroup:
@@ -32,6 +35,52 @@ class SavingsGroup:
         display = name.strip() if name and name.strip() else stored_id
         member = Member(stored_id, display)
         self._members.append(member)
+        return member
+
+    def record_contribution(
+        self, member_id: str, amount: str, week: int | None = None
+    ) -> Contribution:
+        """Record a payment for the current week after all checks pass."""
+        if self.is_complete:
+            raise GroupComplete("The savings group cycle is complete")
+        member = self._require_member(member_id)
+        week = self.current_week if week is None else week
+        if week != self.current_week:
+            raise WeekNotOpen(
+                f"Week {week} is not open (current week is {self.current_week})"
+            )
+        parsed = parse_amount(amount)
+        due = self.owed(member.member_id, week)
+        if parsed > due:
+            raise Overpayment(
+                f"Overpayment: {format_ghs(parsed)} exceeds {format_ghs(due)} "
+                f"owed by {member.member_id} in week {week}"
+            )
+        contribution = Contribution(member.member_id, week, parsed)
+        self._contributions.append(contribution)
+        return contribution
+
+    def paid(self, member_id: str, week: int | None = None) -> Decimal:
+        """Sum of contributions for the member in that week (default: current)."""
+        member = self._require_member(member_id)
+        week = self.current_week if week is None else week
+        return sum(
+            (
+                c.amount
+                for c in self._contributions
+                if c.member_id == member.member_id and c.week == week
+            ),
+            Decimal("0"),
+        )
+
+    def owed(self, member_id: str, week: int | None = None) -> Decimal:
+        """weekly_amount minus paid for that member and week."""
+        return self._weekly_amount - self.paid(member_id, week)
+
+    def _require_member(self, member_id: str) -> Member:
+        member = self._find_member(member_id)
+        if member is None:
+            raise UnknownMember(f"Unknown member: {member_id}")
         return member
 
     def _find_member(self, member_id: str) -> Member | None:

@@ -1,6 +1,7 @@
 import unittest
+from decimal import Decimal
 
-from susu.errors import DuplicateMember, SusuError
+from susu.errors import DuplicateMember, InvalidAmount, Overpayment, SusuError, UnknownMember
 from susu.group import SavingsGroup
 from susu.models import Member
 
@@ -26,6 +27,35 @@ class TestSavingsGroup(unittest.TestCase):
             group.add_member("  ")
         self.assertEqual(str(ctx.exception), "Member identifier is required")
         self.assertEqual(len(group.members), 1)
+
+    def test_03_partial_payments_accumulate(self):
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        group.record_contribution("ama", "20.00")
+        group.record_contribution("AMA", "15")
+        self.assertEqual(group.paid("ama"), Decimal("35.00"))
+        self.assertEqual(group.owed("ama"), Decimal("15.00"))
+        self.assertEqual(len(group.contributions), 2)
+
+    def test_04_rejects_invalid_and_overpayment(self):
+        group = SavingsGroup("50.00")
+        group.add_member("ama")
+        with self.assertRaises(UnknownMember):
+            group.record_contribution("kofi", "10.00")
+        self.assertEqual(len(group.contributions), 0)
+        for raw in ("0", "-5"):
+            with self.assertRaises(InvalidAmount):
+                group.record_contribution("ama", raw)
+        group.record_contribution("ama", "40.00")
+        with self.assertRaises(Overpayment):
+            group.record_contribution("ama", "10.01")
+        self.assertEqual(group.paid("ama"), Decimal("40.00"))
+        group2 = SavingsGroup("50.00")
+        group2.add_member("ama")
+        group2.record_contribution("ama", "30.00")
+        with self.assertRaises(Overpayment):
+            group2.record_contribution("ama", "20.01")
+        self.assertEqual(group2.paid("ama"), Decimal("30.00"))
 
 
 if __name__ == "__main__":
